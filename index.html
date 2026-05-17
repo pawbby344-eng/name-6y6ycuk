@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Gadget House — Магазин</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #0a0a0f;
+            --card-bg: rgba(255,255,255,0.05);
+            --card-border: rgba(255,255,255,0.1);
+            --text: #ffffff;
+            --text-secondary: #8b8b9e;
+            --accent: #007AFF;
+            --accent-gradient: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+            --glass: rgba(255,255,255,0.08);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding-bottom: 80px;
+        }
+
+        /* Шапка */
+        .header {
+            padding: 20px 16px;
+            background: linear-gradient(180deg, rgba(0,122,255,0.15) 0%, transparent 100%);
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        /* Категории */
+        .categories {
+            display: flex;
+            gap: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            scrollbar-width: none;
+        }
+
+        .categories::-webkit-scrollbar { display: none; }
+
+        .category-btn {
+            padding: 8px 16px;
+            border-radius: 20px;
+            border: 1px solid var(--card-border);
+            background: var(--glass);
+            color: var(--text);
+            font-size: 13px;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .category-btn.active {
+            background: var(--accent-gradient);
+            border-color: transparent;
+        }
+
+        /* Сетка товаров */
+        .products-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            padding: 0 16px;
+        }
+
+        @media (min-width: 500px) {
+            .products-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+
+        /* Карточка товара */
+        .product-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            overflow: hidden;
+            backdrop-filter: blur(20px);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .product-card:active {
+            transform: scale(0.96);
+        }
+
+        .product-card:hover {
+            box-shadow: 0 8px 32px rgba(0,122,255,0.15);
+        }
+
+        .product-image {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        }
+
+        .product-info {
+            padding: 12px;
+        }
+
+        .product-name {
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.3;
+            margin-bottom: 6px;
+        }
+
+        .product-price {
+            font-size: 16px;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .product-stock {
+            font-size: 11px;
+            color: #34C759;
+            margin-top: 4px;
+        }
+
+        .add-to-cart {
+            width: 100%;
+            margin-top: 10px;
+            padding: 10px;
+            border: none;
+            border-radius: 12px;
+            background: var(--accent-gradient);
+            color: white;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .add-to-cart:active { opacity: 0.7; }
+
+        /* Нижний бар */
+        .bottom-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(10,10,15,0.9);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid var(--card-border);
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .cart-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .cart-count {
+            background: var(--accent-gradient);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .cart-total {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .checkout-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 12px;
+            background: var(--accent-gradient);
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        /* Модальное окно товара */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            overflow-y: auto;
+        }
+
+        .modal.active { display: block; }
+
+        .modal-content {
+            background: var(--bg);
+            min-height: 100vh;
+        }
+
+        .modal-image {
+            width: 100%;
+            height: 300px;
+            object-fit: cover;
+        }
+
+        .modal-info {
+            padding: 20px;
+        }
+
+        .modal-name {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .modal-price {
+            font-size: 28px;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 16px;
+        }
+
+        .modal-desc {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+
+        .close-modal {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.5);
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            z-index: 101;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .back-to-bot {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            background: var(--accent-gradient);
+            border: none;
+            color: white;
+            font-size: 13px;
+            cursor: pointer;
+            z-index: 101;
+        }
+
+        /* Аксессуары */
+        .accessories {
+            margin-top: 16px;
+        }
+
+        .accessory-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: var(--glass);
+            border-radius: 12px;
+            margin-bottom: 8px;
+        }
+
+        .accessory-name { font-size: 14px; }
+        .accessory-price { 
+            font-weight: 600; 
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .accessory-check {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: 2px solid var(--accent);
+            cursor: pointer;
+        }
+
+        .accessory-check.checked {
+            background: var(--accent-gradient);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 Gadget House</h1>
+        <p>Магазин техники и аксессуаров</p>
+    </div>
+
+    <div class="categories">
+        <button class="category-btn active" onclick="filterCategory('all')">Все</button>
+        <button class="category-btn" onclick="filterCategory('ноутбуки')">💻 Ноутбуки</button>
+        <button class="category-btn" onclick="filterCategory('часы')">⌚ Часы</button>
+        <button class="category-btn" onclick="filterCategory('роутеры')">📡 Роутеры</button>
+        <button class="category-btn" onclick="filterCategory('чехлы')">🔧 Аксессуары</button>
+    </div>
+
+    <div class="products-grid" id="products"></div>
+
+    <!-- Модальное окно -->
+    <div class="modal" id="modal">
+        <button class="close-modal" onclick="closeModal()">←</button>
+        <button class="back-to-bot" onclick="backToBot()">↩️ Назад к боту</button>
+        <div class="modal-content" id="modalContent"></div>
+    </div>
+
+    <!-- Нижний бар -->
+    <div class="bottom-bar">
+        <div class="cart-info">
+            <div class="cart-count" id="cartCount">0</div>
+            <div class="cart-total" id="cartTotal">0 ₽</div>
+        </div>
+        <button class="checkout-btn" onclick="checkout()">Оформить</button>
+    </div>
+
+    <script>
+        // Инициализация Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        // Товары
+        const products = [
+            {
+                id: "macbook_air_m3",
+                name: "MacBook Air M3",
+                price: 149500,
+                category: "ноутбуки",
+                stock: 5,
+                image: "https://cdn.verk.net/kuvastin/w:816/h:510/rt:fit/q:80/ex:1/sh:0.5/plain/images/37/2_1007957-1242x1080.jpg",
+                description: "13.6 дюймов, 16 ГБ ОЗУ, 512 ГБ SSD. Лёгкий, мощный, бесшумный. Идеален для работы и учёбы."
+            },
+            {
+                id: "apple_watch_gray",
+                name: "Apple Watch S11 Gray",
+                price: 39900,
+                category: "часы",
+                stock: 8,
+                image: "https://cdn.verk.net/kuvastin/w:816/h:510/rt:fit/q:80/ex:1/sh:0.5/plain/images/28/2_1011548-4000x4000.jpg",
+                description: "46mm, чип S10, 64 ГБ, Liquid Glass. Цвет: космический серый. Спортивный ремешок."
+            },
+            {
+                id: "apple_watch_pink",
+                name: "Apple Watch S11 Pink",
+                price: 39900,
+                category: "часы",
+                stock: 6,
+                image: "https://www.proshop.fi/Images/1600x1200/3405626_5b192f2e9dd4.jpg",
+                description: "46mm, чип S10, 64 ГБ, Liquid Glass. Цвет: розовый песок. Спортивный ремешок."
+            },
+            {
+                id: "apple_watch_silver",
+                name: "Apple Watch S11 Silver",
+                price: 39900,
+                category: "часы",
+                stock: 7,
+                image: "https://static.elisa.com/v2/image/2tqybbhjs47b/6syrI0cg6QPk3P4F20SzK7/Watch+Series+11+GPS+46+mm+t%C3%A4htiharmaa+alumiinikuori+ja+musta+urheiluranneke+L.jpeg?w=800&fm=avif&env=master&q=75",
+                description: "46mm, чип S10, 64 ГБ, Liquid Glass. Цвет: серебристый. Спортивный ремешок."
+            },
+            {
+                id: "tplink_archer",
+                name: "TP-Link Archer C54",
+                price: 5999,
+                category: "роутеры",
+                stock: 15,
+                image: "https://via.placeholder.com/400x300/1a1a2e/007AFF?text=TP-Link+C54",
+                description: "Двухдиапазонный роутер Wi-Fi AC1200 с MU-MIMO. 4 антенны, до 1200 Мбит/с."
+            }
+        ];
+
+        const accessories = [
+            { id: "case_green", name: "Чехол Kevlar Green", price: 3500 },
+            { id: "case_gray", name: "Чехол Kevlar Gray", price: 3500 },
+            { id: "case_blue", name: "Чехол Kevlar Blue", price: 3500 }
+        ];
+
+        let cart = [];
+        let currentCategory = 'all';
+
+        function renderProducts() {
+            const grid = document.getElementById('products');
+            const filtered = currentCategory === 'all' 
+                ? products 
+                : products.filter(p => p.category === currentCategory);
+
+            grid.innerHTML = filtered.map(p => `
+                <div class="product-card" onclick="openModal('${p.id}')">
+                    <img class="product-image" src="${p.image}" alt="${p.name}" onerror="this.src='https://via.placeholder.com/400x300/1a1a2e/007AFF?text=${encodeURIComponent(p.name)}'">
+                    <div class="product-info">
+                        <div class="product-name">${p.name}</div>
+                        <div class="product-price">${p.price.toLocaleString('ru-RU')} ₽</div>
+                        <div class="product-stock">✅ В наличии: ${p.stock} шт.</div>
+                        <button class="add-to-cart" onclick="event.stopPropagation(); addToCart('${p.id}')">🛒 В корзину</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterCategory(cat) {
+            currentCategory = cat;
+            document.querySelectorAll('.category-btn').forEach(btn => {
+                btn.classList.toggle('active', 
+                    (cat === 'all' && btn.textContent === 'Все') ||
+                    btn.textContent.includes(cat === 'ноутбуки' ? 'Ноутбуки' : 
+                        cat === 'часы' ? 'Часы' : 
+                        cat === 'роутеры' ? 'Роутеры' : 'Аксессуары')
+                );
+            });
+            renderProducts();
+        }
+
+        function openModal(productId) {
+            const p = products.find(x => x.id === productId);
+            if (!p) return;
+
+            const content = document.getElementById('modalContent');
+            content.innerHTML = `
+                <img class="modal-image" src="${p.image}" onerror="this.src='https://via.placeholder.com/400x300/1a1a2e/007AFF?text=${encodeURIComponent(p.name)}'">
+                <div class="modal-info">
+                    <div class="modal-name">${p.name}</div>
+                    <div class="modal-price">${p.price.toLocaleString('ru-RU')} ₽</div>
+                    <div class="modal-desc">${p.description}</div>
+                    <div style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;">
+                        ✅ В наличии: ${p.stock} шт.
+                    </div>
+
+                    <div class="accessories">
+                        <h3 style="margin-bottom: 12px; font-size: 16px;">🔧 Аксессуары</h3>
+                        ${accessories.map(a => `
+                            <div class="accessory-item">
+                                <div>
+                                    <div class="accessory-name">${a.name}</div>
+                                    <div class="accessory-price">+${a.price.toLocaleString('ru-RU')} ₽</div>
+                                </div>
+                                <div class="accessory-check" onclick="toggleAccessory(this)"></div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <button class="add-to-cart" style="margin-top: 24px; padding: 16px; font-size: 16px;" onclick="addToCart('${p.id}'); closeModal();">
+                        🛒 Добавить в корзину — ${p.price.toLocaleString('ru-RU')} ₽
+                    </button>
+                </div>
+            `;
+            document.getElementById('modal').classList.add('active');
+            tg.BackButton.show();
+            tg.BackButton.onClick(closeModal);
+        }
+
+        function closeModal() {
+            document.getElementById('modal').classList.remove('active');
+            tg.BackButton.hide();
+        }
+
+        function backToBot() {
+            tg.close();
+        }
+
+        function toggleAccessory(el) {
+            el.classList.toggle('checked');
+        }
+
+        function addToCart(productId) {
+            const p = products.find(x => x.id === productId);
+            if (!p) return;
+            cart.push(p);
+            updateCart();
+            tg.HapticFeedback.impactOccurred('light');
+        }
+
+        function updateCart() {
+            const count = cart.length;
+            const total = cart.reduce((sum, p) => sum + p.price, 0);
+            document.getElementById('cartCount').textContent = count;
+            document.getElementById('cartTotal').textContent = total.toLocaleString('ru-RU') + ' ₽';
+        }
+
+        function checkout() {
+            if (cart.length === 0) {
+                tg.showAlert('Корзина пуста!');
+                return;
+            }
+            const total = cart.reduce((sum, p) => sum + p.price, 0);
+            tg.showConfirm(`Оформить заказ на ${total.toLocaleString('ru-RU')} ₽?`, (confirmed) => {
+                if (confirmed) {
+                    tg.sendData(JSON.stringify({action: 'checkout', items: cart.map(p => p.id), total: total}));
+                    cart = [];
+                    updateCart();
+                    tg.showAlert('Заказ оформлен! Менеджер свяжется с вами.');
+                }
+            });
+        }
+
+        // Инициализация
+        renderProducts();
+        updateCart();
+
+        // Настройка цвета шапки Telegram
+        tg.setHeaderColor('#0a0a0f');
+        tg.setBackgroundColor('#0a0a0f');
+    </script>
+</body>
+</html>

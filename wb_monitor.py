@@ -1,14 +1,12 @@
 import os
 import asyncio
 import time
-import httpx
+from curl_cffi.requests import AsyncSession
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Ссылка на категорию (это пример, нужно подставить свою из запроса)
-# Чтобы получить свою: открой WB, выбери категорию, открой сеть (F12 -> Network),
-# найди запрос к catalog.json, скопируй URL.
+# Ссылка на API-запрос WB (берётся из DevTools -> Network на странице поиска/категории).
 WB_URL = os.getenv(
     "WB_URL",
     "https://catalog.wb.ru/catalog/new/catalog.json?appType=1&sort=newly&cat=11893",
@@ -23,24 +21,36 @@ MIN_DISCOUNT = int(os.getenv("MIN_DISCOUNT", "0"))   # минимальная с
 MIN_RATING = float(os.getenv("MIN_RATING", "0"))     # минимальный рейтинг товара
 MAX_PRICE = int(os.getenv("MAX_PRICE", "0"))         # максимальная цена, руб. (0 = без ограничения)
 
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))  # задержка между запросами, сек.
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))      # задержка между запросами, сек.
+RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "60"))  # пауза после ошибки 429, сек.
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "*/*",
-    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Origin": "https://www.wildberries.ru",
-    "Referer": "https://www.wildberries.ru/",
-}
-
-# Доп. задержка после ошибки 429 (слишком много запросов), сек.
-RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "60"))
+# Под каким браузером "притворяемся" (нужно, чтобы WB не блокировал бота).
+IMPERSONATE = os.getenv("IMPERSONATE", "chrome")
 
 
-def passes_filters(product):
-    discount = product.get("sale", 0)
-    rating = product.get("reviewRating") or product.get("rating") or 0
-    price = product.get("salePriceU", 0) / 100
+def get_price_info(p):
+    """Возвращает (цена, старая_цена, скидка_%) с учётом старого и нового формата API."""
+    # Новый формат (v18): цена лежит в sizes[].price
+    for size in p.get("sizes", []) or []:
+        price = size.get("price") or {}
+        product = price.get("product")
+        if product:
+            basic = price.get("basic", product)
+            sale_price = product / 100
+            old_price = basic / 100
+            discount = round((1 - product / basic) * 100) if basic else 0
+            return sale_price, old_price, discount
+
+    # Старый формат: salePriceU / priceU / sale
+    sale_price = p.get("salePriceU", 0) / 100
+    old_price = p.get("priceU", 0) / 100
+    discount = p.get("sale", 0)
+    return sale_price, old_price, discount
+
+
+def passes_filters(p):
+    price, _, discount = get_price_info(p)
+    rating = p.get("reviewRating") or p.get("rating") or 0
 
     if discount < MIN_DISCOUNT:
         return False
@@ -51,18 +61,16 @@ def passes_filters(product):
     return True
 
 
-async def send_telegram(client, product):
+async def send_telegram(session, p):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
 
-    price = product.get("salePriceU", 0) / 100
-    old_price = product.get("priceU", 0) / 100
-    discount = product.get("sale", 0)
-    rating = product.get("reviewRating") or product.get("rating") or "—"
-    link = f"https://www.wildberries.ru/catalog/{product['id']}/detail.aspx"
+    price, old_price, discount = get_price_info(p)
+    rating = p.get("reviewRating") or p.get("rating") or "—"
+    link = f"https://www.wildberries.ru/catalog/{p['id']}/detail.aspx"
 
     text = (
-        f"🆕 <b>{product['name']}</b>\n\n"
+        f"🆕 <b>{p['name']}</b>\n\n"
         f"💰 Цена: {price:.0f} ₽"
         + (f" (было {old_price:.0f} ₽, -{discount}%)\n" if discount else "\n")
         + f"⭐ Рейтинг: {rating}\n"
@@ -70,14 +78,14 @@ async def send_telegram(client, product):
     )
 
     try:
-        await client.post(
+        await session.post(
             TELEGRAM_API,
             json={
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": text,
                 "parse_mode": "HTML",
             },
-            timeout=10.0,
+            timeout=10,
         )
     except Exception as e:
         print(f"Не удалось отправить в Telegram: {e}")
@@ -87,10 +95,10 @@ async def monitor():
     seen_ids = set()
     print("Запуск мониторинга...")
 
-    async with httpx.AsyncClient(http2=True) as client:
+    async with AsyncSession(impersonate=IMPERSONATE) as session:
         while True:
             try:
-                response = await client.get(WB_URL, headers=HEADERS, timeout=10.0)
+                response = await session.get(WB_URL, timeout=15)
                 if response.status_code == 200:
                     data = response.json()
                     products = data.get("data", {}).get("products", [])
@@ -102,11 +110,12 @@ async def monitor():
                         seen_ids.add(pid)
 
                         if passes_filters(p):
+                            price, _, _ = get_price_info(p)
                             print(
                                 f"[{time.strftime('%H:%M:%S')}] Подходит! "
-                                f"{p['name']} | {p['salePriceU'] / 100} руб."
+                                f"{p['name']} | {price:.0f} руб."
                             )
-                            await send_telegram(client, p)
+                            await send_telegram(session, p)
 
                     # Чистим память, если накопилось слишком много
                     if len(seen_ids) > 5000:

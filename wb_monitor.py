@@ -87,7 +87,7 @@ async def monitor():
     seen_ids = set()
     print("Запуск мониторинга...")
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(http2=True) as client:
         while True:
             try:
                 response = await client.get(WB_URL, headers=HEADERS, timeout=10.0)

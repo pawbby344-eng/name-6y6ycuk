@@ -26,8 +26,15 @@ MAX_PRICE = int(os.getenv("MAX_PRICE", "0"))         # максимальная 
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "15"))  # задержка между запросами, сек.
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Origin": "https://www.wildberries.ru",
+    "Referer": "https://www.wildberries.ru/",
 }
+
+# Доп. задержка после ошибки 429 (слишком много запросов), сек.
+RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "60"))
 
 
 def passes_filters(product):
@@ -104,6 +111,11 @@ async def monitor():
                     # Чистим память, если накопилось слишком много
                     if len(seen_ids) > 5000:
                         seen_ids.clear()
+
+                elif response.status_code == 429:
+                    print(f"Ошибка 429 (слишком много запросов), ждём {RATE_LIMIT_BACKOFF} сек...")
+                    await asyncio.sleep(RATE_LIMIT_BACKOFF)
+                    continue
 
                 else:
                     print(f"Ошибка {response.status_code}, ждем...")

@@ -9,7 +9,7 @@ load_dotenv()
 
 WB_URL = os.getenv(
     "WB_URL",
-    "https://catalog.wb.ru/catalog/new/catalog.json?appType=1&sort=newly&cat=11893",
+    "https://www.wildberries.ru/__internal/search/exactmatch/ru/common/v18/search?ab_testing=false&appType=1&curr=rub&dest=-1690242&hide_dtype=15&hide_vflags=4294967296&lang=ru&locale=ru&query=menu_v3_9463+смартфон&resultset=catalog&sort=popular&spp=30&suppressSpellcheck=false&uclusters=0",
 )
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -113,7 +113,7 @@ async def monitor():
                         await asyncio.sleep(RATE_LIMIT_BACKOFF)
                         continue
 
-                    products = data.get("data", {}).get("products", [])
+                    products = data.get("products", [])
 
                     if is_first_run:
                         # Первый запуск — просто запоминаем все ID, ничего не шлём

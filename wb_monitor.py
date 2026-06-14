@@ -1,4 +1,5 @@
 import os
+import html
 import math
 import asyncio
 import time
@@ -105,23 +106,51 @@ def passes_filters(p):
     return True
 
 
-async def send_telegram(session, p):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID не заданы — пропускаем отправку")
-        return
+def _safe_pid(pid):
+    """Артикул для подстановки в URL: только если это положительное целое
+    (или строка из цифр), иначе пустая строка — чтобы не утащить мусор/инъекцию
+    в href."""
+    if isinstance(pid, bool):
+        return ""
+    if isinstance(pid, int) and pid > 0:
+        return str(pid)
+    if isinstance(pid, str) and pid.isdigit():
+        return pid
+    return ""
+
+
+def build_message(p):
+    """Собирает HTML-текст уведомления.
+
+    ВСЕ значения из ответа WB экранируются через html.escape. Без этого символы
+    & < > " ' в названии товара ломают parse_mode=HTML, Telegram отвечает
+    400 Bad Request, и уведомление молча теряется. Названия на WB регулярно
+    содержат такие символы, так что это не край, а норма.
+    """
+    if not isinstance(p, dict):
+        p = {}
 
     price, old_price, discount = get_price_info(p)
-    rating = p.get("reviewRating") or p.get("rating") or "—"
-    pid = p.get("id", "")
-    link = f"https://www.wildberries.ru/catalog/{pid}/detail.aspx"
 
-    text = (
-        f"🆕 <b>{p.get('name', 'Без названия')}</b>\n\n"
+    name = html.escape(str(p.get("name") or "Без названия"))
+    rating = html.escape(str(p.get("reviewRating") or p.get("rating") or "—"))
+    link = f"https://www.wildberries.ru/catalog/{_safe_pid(p.get('id'))}/detail.aspx"
+
+    return (
+        f"🆕 <b>{name}</b>\n\n"
         f"💰 Цена: {price:.0f} ₽"
         + (f" (было {old_price:.0f} ₽, -{discount}%)\n" if discount else "\n")
         + f"⭐ Рейтинг: {rating}\n"
         f"🔗 <a href=\"{link}\">Открыть на WB</a>"
     )
+
+
+async def send_telegram(session, p):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID не заданы — пропускаем отправку")
+        return
+
+    text = build_message(p)
 
     try:
         resp = await session.post(

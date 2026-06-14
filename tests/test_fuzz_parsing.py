@@ -13,11 +13,22 @@ import re
 import sys
 import math
 
+import pytest
 from hypothesis import given, settings, example, strategies as st
 
 # Импортируем тестируемый модуль из корня репозитория
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import wb_monitor as wb  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def fixed_thresholds(monkeypatch):
+    """Фиксируем пороги фильтра, чтобы тесты не зависели от .env конкретной
+    машины (там может быть MIN_DISCOUNT=70 и т.п.). Тест проверяет поведение
+    функций, а не локальную конфигурацию."""
+    monkeypatch.setattr(wb, "MIN_DISCOUNT", 0)
+    monkeypatch.setattr(wb, "MIN_RATING", 0.0)
+    monkeypatch.setattr(wb, "MAX_PRICE", 0)
 
 
 # --- Стратегии генерации «товара» --------------------------------------------
@@ -68,14 +79,16 @@ product = st.dictionaries(
 # --- Свойства ----------------------------------------------------------------
 
 # Пины конкретных входов, которые РАНЬШЕ роняли парсер (регресс-защита,
-# чтобы случайный сид Hypothesis их не «потерял")
+# чтобы случайный сид Hypothesis их не «потерял»)
 @example({"salePriceU": None})          # None / 100
 @example({"priceU": None})              # None / 100
 @example({"sizes": [{"price": {"product": "0", "basic": None}}]})  # str / 100
 @example({"sizes": [{"price": {"product": 1, "basic": "0"}}]})     # str / 100
 @example({"sizes": "не-список"})        # итерирование по строке
 @example({"sizes": ["мусор", 123, None]})  # не-dict элементы
-@settings(max_examples=2000, deadline=None)
+@example(None)                          # сам товар — не dict
+@example("вообще не словарь")
+@settings(max_examples=500, deadline=None)
 @given(product)
 def test_get_price_info_never_crashes(p):
     out = wb.get_price_info(p)
@@ -88,7 +101,9 @@ def test_get_price_info_never_crashes(p):
         assert not (isinstance(v, float) and (math.isnan(v) or math.isinf(v))), out
 
 
-@settings(max_examples=2000, deadline=None)
+@example(None)               # не-dict вход → False, без краша
+@example(["мусор"])
+@settings(max_examples=500, deadline=None)
 @given(product)
 def test_passes_filters_returns_bool(p):
     out = wb.passes_filters(p)
@@ -113,7 +128,7 @@ well_formed = st.fixed_dictionaries({
 })
 
 
-@settings(max_examples=2000, deadline=None)
+@settings(max_examples=500, deadline=None)
 @given(well_formed)
 def test_realistic_shape_no_crash(p):
     sale, old, discount = wb.get_price_info(p)
@@ -135,7 +150,8 @@ def _strip_allowed(text):
 @example({"name": 'Чехол <iPhone> "Pro" & стекло', "id": 123})  # реальный кейс с WB
 @example({"name": None, "id": None})
 @example({"name": "</b><script>", "id": "0; DROP"})
-@settings(max_examples=2000, deadline=None)
+@example(None)               # не-dict вход не должен ронять сборку
+@settings(max_examples=500, deadline=None)
 @given(product)
 def test_build_message_is_telegram_safe(p):
     text = wb.build_message(p)

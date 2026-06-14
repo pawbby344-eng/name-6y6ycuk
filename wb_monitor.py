@@ -1,4 +1,5 @@
 import os
+import math
 import asyncio
 import time
 from collections import deque
@@ -26,27 +27,74 @@ RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "120"))  # было 60
 IMPERSONATE = os.getenv("IMPERSONATE", "chrome")
 
 
+def _num(x):
+    """Безопасно приводит значение к конечному float или возвращает None.
+
+    WB обычно шлёт числа, но ответ может быть неполным/битым (None, строка,
+    NaN, inf) — такие значения не должны ломать арифметику ниже.
+    """
+    if isinstance(x, bool):  # bool — подкласс int, но как цену не трактуем
+        return None
+    if isinstance(x, (int, float)):
+        f = float(x)
+    elif isinstance(x, str):
+        try:
+            f = float(x.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return f
+
+
 def get_price_info(p):
-    """Возвращает (цена, старая_цена, скидка_%) с учётом старого и нового формата API."""
-    for size in p.get("sizes", []) or []:
-        price = size.get("price") or {}
-        product = price.get("product")
-        if product:
-            basic = price.get("basic") or product  # если basic нет — скидки нет
+    """Возвращает (цена, старая_цена, скидка_%) с учётом старого и нового формата API.
+
+    Устойчива к мусору в ответе: всегда возвращает кортеж из трёх конечных чисел.
+    """
+    if not isinstance(p, dict):
+        return 0.0, 0.0, 0
+
+    sizes = p.get("sizes")
+    if isinstance(sizes, list):
+        for size in sizes:
+            if not isinstance(size, dict):
+                continue
+            price = size.get("price")
+            if not isinstance(price, dict):
+                continue
+
+            product = _num(price.get("product"))
+            if product is None or product <= 0:
+                continue
+
+            basic = _num(price.get("basic"))
+            if basic is None or basic <= 0:  # нет валидной базовой цены — скидки нет
+                basic = product
+
             sale_price = product / 100
             old_price = basic / 100
-            discount = round((1 - product / basic) * 100) if basic and basic != product else 0
+            discount = round((1 - product / basic) * 100) if basic != product else 0
+            if discount < 0:  # текущая цена выше «базовой» — это не скидка
+                discount = 0
             return sale_price, old_price, discount
 
-    sale_price = p.get("salePriceU", 0) / 100
-    old_price = p.get("priceU", 0) / 100
-    discount = p.get("sale", 0)
+    # Fallback на старый формат (salePriceU/priceU/sale)
+    sale_price = (_num(p.get("salePriceU")) or 0.0) / 100
+    old_price = (_num(p.get("priceU")) or 0.0) / 100
+    discount = _num(p.get("sale")) or 0
+    discount = int(discount) if discount > 0 else 0
     return sale_price, old_price, discount
 
 
 def passes_filters(p):
+    if not isinstance(p, dict):
+        return False
+
     price, _, discount = get_price_info(p)
-    rating = p.get("reviewRating") or p.get("rating") or 0
+    rating = _num(p.get("reviewRating")) or _num(p.get("rating")) or 0.0
 
     if discount < MIN_DISCOUNT:
         return False

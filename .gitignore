@@ -1,3 +1,4 @@
 .env
+categories.json
 __pycache__/
 *.pyc

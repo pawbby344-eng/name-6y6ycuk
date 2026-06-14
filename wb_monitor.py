@@ -17,10 +17,18 @@ DEFAULT_MIN_DISCOUNT = int(os.getenv("MIN_DISCOUNT", "0"))
 DEFAULT_MIN_RATING = float(os.getenv("MIN_RATING", "0"))
 DEFAULT_MAX_PRICE = int(os.getenv("MAX_PRICE", "0"))
 
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "120"))
 RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "120"))
 
 IMPERSONATE = os.getenv("IMPERSONATE", "chrome")
+
+HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.wildberries.ru/",
+    "Origin": "https://www.wildberries.ru",
+    "x-requested-with": "XMLHttpRequest",
+}
 
 CATEGORIES_FILE = os.getenv("CATEGORIES_FILE", "categories.json")
 
@@ -144,7 +152,7 @@ async def monitor_category(session, category):
 
     while True:
         try:
-            response = await session.get(url, timeout=15)
+            response = await session.get(url, timeout=15, headers=HEADERS)
 
             if response.status_code == 200:
                 try:

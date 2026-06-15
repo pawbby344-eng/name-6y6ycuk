@@ -23,6 +23,9 @@ DEFAULT_MAX_PRICE = int(os.getenv("MAX_PRICE", "0"))
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "120"))
 RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "120"))
 
+# Опрос watchlist можно делать чаще, чем категории — список обычно короче
+WATCHLIST_POLL_INTERVAL = int(os.getenv("WATCHLIST_POLL_INTERVAL", "20"))
+
 IMPERSONATE = os.getenv("IMPERSONATE", "chrome")
 
 HEADERS = {
@@ -446,7 +449,7 @@ async def monitor_watchlist(session, items):
 
             await asyncio.sleep(1)  # пауза между карточками, чтобы не долбить API
 
-        await asyncio.sleep(POLL_INTERVAL)
+        await asyncio.sleep(WATCHLIST_POLL_INTERVAL)
 
 
 async def _run_watchlist():

@@ -3,3 +3,6 @@ services:
     build: .
     env_file: .env
     restart: unless-stopped
+    # Для MODE=watchlist раскомментируй, чтобы прокинуть список товаров внутрь:
+    # volumes:
+    #   - ./watchlist.txt:/app/watchlist.txt:ro

@@ -1,4 +1,5 @@
 import os
+import re
 import html
 import math
 import asyncio
@@ -26,6 +27,12 @@ POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))       # было 15 — с
 RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "120"))  # было 60
 
 IMPERSONATE = os.getenv("IMPERSONATE", "chrome")
+
+# Режим работы: "category" — следить за категорией/поиском (WB_URL),
+#               "watchlist" — следить за конкретными артикулами из файла
+MODE = os.getenv("MODE", "category").strip().lower()
+WATCHLIST_FILE = os.getenv("WATCHLIST_FILE", "watchlist.txt")
+WB_DEST = os.getenv("WB_DEST", "-1257786")  # регион доставки для card-API
 
 
 def _num(x):
@@ -104,6 +111,83 @@ def passes_filters(p):
     if MAX_PRICE and price > MAX_PRICE:
         return False
     return True
+
+
+_NM_IN_LINK = re.compile(r"/catalog/(\d+)/")
+
+
+def extract_nmid(s):
+    """Достаёт артикул (nmId) из ссылки WB, голого числа или строки вида
+    'арт. 12345678'. Возвращает int или None, если ничего не нашёл."""
+    if isinstance(s, bool):
+        return None
+    if isinstance(s, int):
+        return s if s > 0 else None
+    if not isinstance(s, str):
+        return None
+    s = s.strip()
+    if not s:
+        return None
+
+    candidate = None
+    m = _NM_IN_LINK.search(s)          # ссылка .../catalog/12345678/detail.aspx
+    if m:
+        candidate = int(m.group(1))
+    elif s.isdigit():                  # просто артикул
+        candidate = int(s)
+    else:
+        m = re.fullmatch(r"\D*?(\d{5,})\D*", s)  # 'арт 12345678', '#12345678'
+        if m:
+            candidate = int(m.group(1))
+
+    return candidate if candidate and candidate > 0 else None
+
+
+def parse_watchlist(text):
+    """Парсит текст watchlist в список (nmid, target_price | None).
+
+    Формат строки: '<ссылка-или-артикул> [= целевая_цена]'.
+    Пустые строки и строки, начинающиеся с '#', игнорируются. Дубликаты
+    артикулов отбрасываются (остаётся первое вхождение)."""
+    items = []
+    seen = set()
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        # Целевая цена — только числовой «хвост» в конце строки после = или @.
+        # Якорь на конец не даёт спутать с '=' внутри URL (?targetUrl=GP).
+        target = None
+        m = re.search(r"[=@]\s*([0-9][0-9\s.,]*)\s*$", line)
+        if m:
+            t = _num(m.group(1).replace(" ", "").replace(",", "."))
+            if t and t > 0:
+                target = t
+                line = line[:m.start()].strip()
+
+        nmid = extract_nmid(line)
+        if nmid and nmid not in seen:
+            seen.add(nmid)
+            items.append((nmid, target))
+    return items
+
+
+def load_watchlist(path):
+    """Читает watchlist из файла. Нет файла — пустой список."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return parse_watchlist(f.read())
+    except FileNotFoundError:
+        return []
+
+
+def card_url(nmid):
+    """URL card-API WB для получения карточки товара по артикулу."""
+    return (
+        f"https://card.wb.ru/cards/v4/detail"
+        f"?appType=1&curr=rub&dest={WB_DEST}&nm={nmid}"
+    )
 
 
 def _safe_pid(pid):
@@ -241,5 +325,80 @@ async def monitor():
             await asyncio.sleep(POLL_INTERVAL)
 
 
+async def fetch_card(session, nmid):
+    """Тянет карточку товара по артикулу через card-API. None при любой ошибке."""
+    try:
+        r = await session.get(card_url(nmid), timeout=15)
+    except Exception as e:
+        print(f"[{nmid}] ошибка сети: {e}")
+        return None
+    if r.status_code != 200:
+        print(f"[{nmid}] HTTP {r.status_code}")
+        return None
+    try:
+        data = r.json()
+    except Exception:
+        print(f"[{nmid}] ответ не JSON")
+        return None
+    products = data.get("products") or data.get("data", {}).get("products", [])
+    return products[0] if products else None
+
+
+async def monitor_watchlist(session, items):
+    """Следит за конкретными артикулами: шлёт алерт при достижении целевой
+    цены или при любом снижении цены относительно прошлой проверки."""
+    last_price = {}     # nmid -> последняя известная цена
+    below_target = set()  # по каким артикулам уже уведомили о достижении цели
+
+    print(f"Отслеживаю {len(items)} товаров по артикулам...")
+
+    while True:
+        for nmid, target in items:
+            p = await fetch_card(session, nmid)
+            if not p:
+                continue
+
+            price, _, _ = get_price_info(p)
+            if price <= 0:  # нет цены/нет в наличии — пропускаем
+                continue
+
+            prev = last_price.get(nmid)
+            last_price[nmid] = price
+
+            reason = None
+            if target and price <= target:
+                # Уведомляем один раз при пересечении цели, пока не уйдёт выше
+                if nmid not in below_target:
+                    below_target.add(nmid)
+                    reason = f"цена {price:.0f} ₽ ≤ цели {target:.0f} ₽"
+            else:
+                below_target.discard(nmid)
+                if prev is not None and price < prev:
+                    reason = f"цена упала: {prev:.0f} → {price:.0f} ₽"
+
+            if reason:
+                print(f"[{time.strftime('%H:%M:%S')}] {nmid}: {reason}")
+                await send_telegram(session, p)
+
+            await asyncio.sleep(1)  # пауза между карточками, чтобы не долбить API
+
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+async def _run_watchlist():
+    items = load_watchlist(WATCHLIST_FILE)
+    if not items:
+        print(
+            f"Watchlist пуст или файл не найден ({WATCHLIST_FILE}). "
+            f"Добавь ссылки/артикулы — см. watchlist.txt.example."
+        )
+        return
+    async with AsyncSession(impersonate=IMPERSONATE) as session:
+        await monitor_watchlist(session, items)
+
+
 if __name__ == "__main__":
-    asyncio.run(monitor())
+    if MODE == "watchlist":
+        asyncio.run(_run_watchlist())
+    else:
+        asyncio.run(monitor())

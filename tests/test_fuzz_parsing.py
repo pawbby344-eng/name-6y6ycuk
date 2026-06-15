@@ -169,3 +169,61 @@ def test_build_message_is_telegram_safe(p):
     # В href не должно быть кавычек/угловых скобок (иначе атрибут «разорвётся»)
     for href in re.findall(r'<a href="([^"]*)"', text):
         assert "<" not in href and ">" not in href, href
+
+
+# --- extract_nmid / parse_watchlist ------------------------------------------
+
+@pytest.mark.parametrize("inp,expected", [
+    ("12345678", 12345678),
+    ("https://www.wildberries.ru/catalog/12345678/detail.aspx", 12345678),
+    ("https://www.wildberries.ru/catalog/12345678/detail.aspx?targetUrl=GP", 12345678),
+    ("арт. 12345678", 12345678),
+    ("#98765", 98765),
+    (12345678, 12345678),
+    ("https://www.wildberries.ru/catalog/0/detail.aspx", None),  # 0 — не валидный артикул
+    ("", None),
+    ("   ", None),
+    ("нет тут числа", None),
+    (None, None),
+    (-5, None),
+    (True, None),       # bool не артикул
+    (3.14, None),
+])
+def test_extract_nmid(inp, expected):
+    assert wb.extract_nmid(inp) == expected
+
+
+def test_parse_watchlist_basic():
+    text = (
+        "# мой список\n"
+        "12345678 = 1500\n"
+        "https://www.wildberries.ru/catalog/222/detail.aspx @ 999.50\n"
+        "333\n"
+        "\n"
+        "   # коммент с отступом\n"
+        "12345678 = 700\n"      # дубль артикула — игнор
+        "мусор без числа\n"
+    )
+    items = wb.parse_watchlist(text)
+    assert items == [(12345678, 1500.0), (222, 999.5), (333, None)]
+
+
+def test_parse_watchlist_url_with_query_param():
+    # '=' внутри URL (?targetUrl=GP) не должен спутаться с целевой ценой
+    text = "https://www.wildberries.ru/catalog/1140210578/detail.aspx?targetUrl=GP = 999999\n"
+    assert wb.parse_watchlist(text) == [(1140210578, 999999.0)]
+
+    # тот же URL без цены — target остаётся None, артикул извлекается
+    text2 = "https://www.wildberries.ru/catalog/1140210578/detail.aspx?targetUrl=GP\n"
+    assert wb.parse_watchlist(text2) == [(1140210578, None)]
+
+
+@settings(max_examples=300, deadline=None)
+@given(st.text(max_size=200))
+def test_parse_watchlist_never_crashes(text):
+    items = wb.parse_watchlist(text)
+    assert isinstance(items, list)
+    for entry in items:
+        nmid, target = entry
+        assert isinstance(nmid, int) and nmid > 0
+        assert target is None or (isinstance(target, float) and target > 0)

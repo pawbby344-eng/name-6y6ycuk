@@ -21,16 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import wb_monitor as wb  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def fixed_thresholds(monkeypatch):
-    """Фиксируем пороги фильтра, чтобы тесты не зависели от .env конкретной
-    машины (там может быть MIN_DISCOUNT=70 и т.п.). Тест проверяет поведение
-    функций, а не локальную конфигурацию."""
-    monkeypatch.setattr(wb, "MIN_DISCOUNT", 0)
-    monkeypatch.setattr(wb, "MIN_RATING", 0.0)
-    monkeypatch.setattr(wb, "MAX_PRICE", 0)
-
-
 # --- Стратегии генерации «товара» --------------------------------------------
 
 # Скаляры, включая заведомо «ядовитые» значения
@@ -106,7 +96,7 @@ def test_get_price_info_never_crashes(p):
 @settings(max_examples=500, deadline=None)
 @given(product)
 def test_passes_filters_returns_bool(p):
-    out = wb.passes_filters(p)
+    out = wb.passes_filters(p, 0, 0.0, 0)
     assert isinstance(out, bool), out
 
 
@@ -132,7 +122,7 @@ well_formed = st.fixed_dictionaries({
 @given(well_formed)
 def test_realistic_shape_no_crash(p):
     sale, old, discount = wb.get_price_info(p)
-    assert isinstance(wb.passes_filters(p), bool)
+    assert isinstance(wb.passes_filters(p, 0, 0.0, 0), bool)
 
 
 # --- build_message: защита от поломки Telegram HTML ---------------------------

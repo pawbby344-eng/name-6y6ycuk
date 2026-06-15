@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import html
 import math
@@ -10,29 +11,75 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-WB_URL = os.getenv(
-    "WB_URL",
-    "https://www.wildberries.ru/__internal/search/exactmatch/ru/common/v18/search?ab_testing=false&appType=1&curr=rub&dest=-1690242&hide_dtype=15&hide_vflags=4294967296&lang=ru&locale=ru&query=menu_v3_9463+смартфон&resultset=catalog&sort=popular&spp=30&suppressSpellcheck=false&uclusters=0",
-)
-
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
-MIN_DISCOUNT = int(os.getenv("MIN_DISCOUNT", "0"))
-MIN_RATING = float(os.getenv("MIN_RATING", "0"))
-MAX_PRICE = int(os.getenv("MAX_PRICE", "0"))
+# Глобальные фильтры по умолчанию — используются, если категория их не переопределяет
+DEFAULT_MIN_DISCOUNT = int(os.getenv("MIN_DISCOUNT", "0"))
+DEFAULT_MIN_RATING = float(os.getenv("MIN_RATING", "0"))
+DEFAULT_MAX_PRICE = int(os.getenv("MAX_PRICE", "0"))
 
-POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "60"))       # было 15 — слишком агрессивно
-RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "120"))  # было 60
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "120"))
+RATE_LIMIT_BACKOFF = int(os.getenv("RATE_LIMIT_BACKOFF", "120"))
 
 IMPERSONATE = os.getenv("IMPERSONATE", "chrome")
 
-# Режим работы: "category" — следить за категорией/поиском (WB_URL),
+HEADERS = {
+    "Accept": "*/*",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://www.wildberries.ru/",
+    "Origin": "https://www.wildberries.ru",
+    "x-requested-with": "XMLHttpRequest",
+}
+
+CATEGORIES_FILE = os.getenv("CATEGORIES_FILE", "categories.json")
+
+DEFAULT_WB_URL = (
+    "https://www.wildberries.ru/__internal/search/exactmatch/ru/common/v18/search"
+    "?ab_testing=false&appType=1&curr=rub&dest=-1690242&hide_dtype=15&hide_vflags=4294967296"
+    "&lang=ru&locale=ru&query=menu_v3_9463+смартфон&resultset=catalog&sort=popular&spp=30"
+    "&suppressSpellcheck=false&uclusters=0"
+)
+
+# Режим работы: "category"  — следить за категориями из CATEGORIES_FILE (WB_URL),
 #               "watchlist" — следить за конкретными артикулами из файла
 MODE = os.getenv("MODE", "category").strip().lower()
 WATCHLIST_FILE = os.getenv("WATCHLIST_FILE", "watchlist.txt")
 WB_DEST = os.getenv("WB_DEST", "-1257786")  # регион доставки для card-API
+
+
+def load_categories():
+    """Загружает список категорий для мониторинга из CATEGORIES_FILE.
+
+    Если файла нет — создаёт его с одной категорией на основе старых
+    переменных окружения (WB_URL/MIN_DISCOUNT/...), чтобы не потерять
+    текущую настройку при переходе на мультикатегорийный режим.
+    """
+    if not os.path.exists(CATEGORIES_FILE):
+        default = [
+            {
+                "name": "default",
+                "url": os.getenv("WB_URL", DEFAULT_WB_URL),
+                "min_discount": DEFAULT_MIN_DISCOUNT,
+                "min_rating": DEFAULT_MIN_RATING,
+                "max_price": DEFAULT_MAX_PRICE,
+            }
+        ]
+        with open(CATEGORIES_FILE, "w", encoding="utf-8") as f:
+            json.dump(default, f, ensure_ascii=False, indent=2)
+        print(f"Файл {CATEGORIES_FILE} не найден — создан с одной категорией по умолчанию.")
+        return default
+
+    with open(CATEGORIES_FILE, "r", encoding="utf-8") as f:
+        categories = json.load(f)
+
+    for cat in categories:
+        cat.setdefault("min_discount", DEFAULT_MIN_DISCOUNT)
+        cat.setdefault("min_rating", DEFAULT_MIN_RATING)
+        cat.setdefault("max_price", DEFAULT_MAX_PRICE)
+
+    return categories
 
 
 def _num(x):
@@ -97,18 +144,18 @@ def get_price_info(p):
     return sale_price, old_price, discount
 
 
-def passes_filters(p):
+def passes_filters(p, min_discount=DEFAULT_MIN_DISCOUNT, min_rating=DEFAULT_MIN_RATING, max_price=DEFAULT_MAX_PRICE):
     if not isinstance(p, dict):
         return False
 
     price, _, discount = get_price_info(p)
     rating = _num(p.get("reviewRating")) or _num(p.get("rating")) or 0.0
 
-    if discount < MIN_DISCOUNT:
+    if discount < min_discount:
         return False
-    if rating < MIN_RATING:
+    if rating < min_rating:
         return False
-    if MAX_PRICE and price > MAX_PRICE:
+    if max_price and price > max_price:
         return False
     return True
 
@@ -133,10 +180,10 @@ def extract_nmid(s):
     m = _NM_IN_LINK.search(s)          # ссылка .../catalog/12345678/detail.aspx
     if m:
         candidate = int(m.group(1))
-    elif s.isdigit():                  # просто артикул
+    elif s.isascii() and s.isdigit():  # просто артикул (исключаем юникод-цифры типа '\xb2')
         candidate = int(s)
     else:
-        m = re.fullmatch(r"\D*?(\d{5,})\D*", s)  # 'арт 12345678', '#12345678'
+        m = re.fullmatch(r"\D*?([0-9]{5,})\D*", s)  # 'арт 12345678', '#12345678'
         if m:
             candidate = int(m.group(1))
 
@@ -203,7 +250,7 @@ def _safe_pid(pid):
     return ""
 
 
-def build_message(p):
+def build_message(p, category_name=None):
     """Собирает HTML-текст уведомления.
 
     ВСЕ значения из ответа WB экранируются через html.escape. Без этого символы
@@ -220,8 +267,11 @@ def build_message(p):
     rating = html.escape(str(p.get("reviewRating") or p.get("rating") or "—"))
     link = f"https://www.wildberries.ru/catalog/{_safe_pid(p.get('id'))}/detail.aspx"
 
+    category_line = f"📂 Категория: {html.escape(str(category_name))}\n\n" if category_name else ""
+
     return (
-        f"🆕 <b>{name}</b>\n\n"
+        f"🆕 <b>{name}</b>\n"
+        f"{category_line}"
         f"💰 Цена: {price:.0f} ₽"
         + (f" (было {old_price:.0f} ₽, -{discount}%)\n" if discount else "\n")
         + f"⭐ Рейтинг: {rating}\n"
@@ -229,12 +279,12 @@ def build_message(p):
     )
 
 
-async def send_telegram(session, p):
+async def send_telegram(session, p, category_name=None):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("TELEGRAM_BOT_TOKEN или TELEGRAM_CHAT_ID не заданы — пропускаем отправку")
         return
 
-    text = build_message(p)
+    text = build_message(p, category_name)
 
     try:
         resp = await session.post(
@@ -252,83 +302,97 @@ async def send_telegram(session, p):
         print(f"Не удалось отправить в Telegram: {e}")
 
 
-async def monitor():
-    # deque с maxlen — автоматически выбрасывает старые ID, не надо делать clear()
+async def monitor_category(session, category):
+    name = category["name"]
+    url = category["url"]
+    min_discount = category["min_discount"]
+    min_rating = category["min_rating"]
+    max_price = category["max_price"]
+
     seen_ids = deque(maxlen=5000)
-    seen_ids_set = set()  # для быстрого поиска O(1)
+    seen_ids_set = set()
+    is_first_run = True
 
-    print("Запуск мониторинга...")
-    is_first_run = True  # первый прогон — «холодный», только наполняем seen_ids
+    while True:
+        try:
+            response = await session.get(url, timeout=15, headers=HEADERS)
 
-    async with AsyncSession(impersonate=IMPERSONATE) as session:
-        while True:
-            try:
-                response = await session.get(WB_URL, timeout=15)
-
-                if response.status_code == 200:
-                    # Защита от HTML-ответа (капча, редирект)
-                    try:
-                        data = response.json()
-                    except Exception:
-                        print(f"WB вернул не JSON (возможно капча): {response.text[:200]}")
-                        await asyncio.sleep(RATE_LIMIT_BACKOFF)
-                        continue
-
-                    products = data.get("products", [])
-
-                    if is_first_run:
-                        # Первый запуск — просто запоминаем все ID, ничего не шлём
-                        for p in products:
-                            pid = p.get("id")
-                            if pid and pid not in seen_ids_set:
-                                seen_ids.append(pid)
-                                seen_ids_set.add(pid)
-                        print(f"Холодный старт: запомнили {len(seen_ids_set)} товаров, ждём новых...")
-                        is_first_run = False
-                    else:
-                        for p in products:
-                            pid = p.get("id")
-                            if not pid:
-                                continue
-                            if pid in seen_ids_set:
-                                continue
-
-                            # Добавляем в seen ТОЛЬКО если прошёл фильтр
-                            # Товар без скидки сейчас — может появиться со скидкой позже
-                            if passes_filters(p):
-                                seen_ids.append(pid)
-                                seen_ids_set.add(pid)
-
-                                # Синхронизируем set с deque при переполнении
-                                if len(seen_ids_set) > 5000:
-                                    seen_ids_set.clear()
-                                    seen_ids_set.update(seen_ids)
-
-                                price, _, _ = get_price_info(p)
-                                print(
-                                    f"[{time.strftime('%H:%M:%S')}] Подходит! "
-                                    f"{p.get('name', '???')} | {price:.0f} руб."
-                                )
-                                await send_telegram(session, p)
-
-                elif response.status_code == 429:
-                    print(f"Ошибка 429 (rate limit), ждём {RATE_LIMIT_BACKOFF} сек...")
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except Exception:
+                    print(f"[{name}] WB вернул не JSON (возможно капча): {response.text[:200]}")
                     await asyncio.sleep(RATE_LIMIT_BACKOFF)
                     continue
 
+                products = data.get("products", [])
+
+                if is_first_run:
+                    for p in products:
+                        pid = p.get("id")
+                        if pid and pid not in seen_ids_set:
+                            seen_ids.append(pid)
+                            seen_ids_set.add(pid)
+                    print(f"[{name}] Холодный старт: запомнили {len(seen_ids_set)} товаров, ждём новых...")
+                    is_first_run = False
                 else:
-                    print(f"Ошибка {response.status_code}: {response.text[:200]}")
+                    for p in products:
+                        pid = p.get("id")
+                        if not pid:
+                            continue
+                        if pid in seen_ids_set:
+                            continue
 
-            except Exception as e:
-                print(f"Ошибка соединения: {e}")
+                        # Добавляем в seen ТОЛЬКО если прошёл фильтр
+                        # Товар без скидки сейчас — может появиться со скидкой позже
+                        if passes_filters(p, min_discount, min_rating, max_price):
+                            seen_ids.append(pid)
+                            seen_ids_set.add(pid)
 
-            await asyncio.sleep(POLL_INTERVAL)
+                            if len(seen_ids_set) > 5000:
+                                seen_ids_set.clear()
+                                seen_ids_set.update(seen_ids)
+
+                            price, _, _ = get_price_info(p)
+                            print(
+                                f"[{name}][{time.strftime('%H:%M:%S')}] Подходит! "
+                                f"{p.get('name', '???')} | {price:.0f} руб."
+                            )
+                            await send_telegram(session, p, name)
+
+            elif response.status_code == 429:
+                print(f"[{name}] Ошибка 429 (rate limit), ждём {RATE_LIMIT_BACKOFF} сек...")
+                await asyncio.sleep(RATE_LIMIT_BACKOFF)
+                continue
+
+            else:
+                print(f"[{name}] Ошибка {response.status_code}: {response.text[:200]}")
+
+        except Exception as e:
+            print(f"[{name}] Ошибка соединения: {e}")
+
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+async def monitor():
+    categories = load_categories()
+    print(f"Запуск мониторинга: {len(categories)} категория(й)...")
+
+    async with AsyncSession(impersonate=IMPERSONATE) as session:
+        tasks = []
+        for i, category in enumerate(categories):
+            tasks.append(asyncio.create_task(monitor_category(session, category)))
+            if i < len(categories) - 1:
+                # Небольшой сдвиг старта, чтобы не бить WB всеми категориями одновременно
+                await asyncio.sleep(2)
+
+        await asyncio.gather(*tasks)
 
 
 async def fetch_card(session, nmid):
     """Тянет карточку товара по артикулу через card-API. None при любой ошибке."""
     try:
-        r = await session.get(card_url(nmid), timeout=15)
+        r = await session.get(card_url(nmid), timeout=15, headers=HEADERS)
     except Exception as e:
         print(f"[{nmid}] ошибка сети: {e}")
         return None

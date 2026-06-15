@@ -1,4 +1,5 @@
 .env
+categories.json
 watchlist.txt
 __pycache__/
 *.pyc

@@ -18,8 +18,35 @@ gadget-webapp
    - `MODE` — `category` или `watchlist`.
 
 2. Для `MODE=category`:
-   - `WB_URL` — ссылка на `catalog`-API нужной категории (вкладка Network в браузере, запрос к `catalog.wb.ru`).
-   - `MIN_DISCOUNT`, `MIN_RATING`, `MAX_PRICE` — фильтры.
+   - `MIN_DISCOUNT`, `MIN_RATING`, `MAX_PRICE` — фильтры по умолчанию (можно
+     переопределить для каждой категории отдельно).
+   - Настрой категории в `categories.json` (создаётся автоматически при первом
+     запуске на основе `.env`/`WB_URL`, если файла нет). Можно добавить сколько
+     угодно категорий — каждая мониторится параллельно со своим списком
+     "уже виденных" товаров. Пример — `categories.example.json`:
+
+     ```json
+     [
+       {
+         "name": "Смартфоны",
+         "url": "https://www.wildberries.ru/__internal/search/exactmatch/ru/common/v18/search?...",
+         "min_discount": 70,
+         "min_rating": 4.5,
+         "max_price": 0
+       },
+       {
+         "name": "Конструкторы LEGO",
+         "url": "https://search.wb.ru/exactmatch/ru/common/v18/search?...",
+         "min_discount": 50,
+         "min_rating": 4.0,
+         "max_price": 5000
+       }
+     ]
+     ```
+
+     Ссылку `url` для каждой категории бери из DevTools (Network → XHR/Fetch).
+     Поля `min_discount`/`min_rating`/`max_price` опциональны — если не указаны,
+     берутся значения по умолчанию из `.env`.
 
 3. Для `MODE=watchlist`:
    - Скопируй `watchlist.txt.example` в `watchlist.txt` и впиши товары —

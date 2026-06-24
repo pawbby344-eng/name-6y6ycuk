@@ -1,0 +1,54 @@
+<svg width="900.0" height="1100.0" xmlns="http://www.w3.org/2000/svg" style="background-color: white; font-family: sans-serif;">
+    <g transform="translate(100, 100)">
+        <!-- СТЕНЫ (Толстый контур) -->
+        <rect x="0" y="0" width="700.0" height="900.0" fill="none" stroke="black" stroke-width="3"/>
+
+        <!-- РАЗМЕРНЫЕ ЛИНИИ СНАРУЖИ -->
+        <!-- Общая ширина 7м -->
+        <line x1="0" y1="-70" x2="700.0" y2="-70" stroke="black" stroke-width="1"/>
+        <line x1="0" y1="-60" x2="0" y2="-80" stroke="black" stroke-width="1"/>
+        <line x1="700.0" y1="-60" x2="700.0" y2="-80" stroke="black" stroke-width="1"/>
+        <text x="350.0" y="-85" font-size="16" text-anchor="middle" fill="black">7 000 мм</text>
+
+        <!-- Общая глубина 9м -->
+        <line x1="730.0" y1="0" x2="730.0" y2="900.0" stroke="black" stroke-width="1"/>
+        <line x1="720.0" y1="0" x2="740.0" y2="0" stroke="black" stroke-width="1"/>
+        <line x1="720.0" y1="900.0" x2="740.0" y2="900.0" stroke="black" stroke-width="1"/>
+        <text x="745.0" y="450.0" font-size="16" transform="rotate(90, 745.0, 450.0)" fill="black">9 000 мм</text>
+
+        <!-- ПРОЕМЫ -->
+        <!-- Вход (1м) -->
+        <rect x="0.0" y="900.0" width="100.0" height="8" fill="none" stroke="black" stroke-width="2"/>
+        <line x1="0.0" y1="905.0" x2="100.0" y2="905.0" stroke="black" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="20.0" y="935.0" font-size="14" fill="black">Вход (1000)</text>
+
+        <!-- Окно (4.8м) -->
+        <rect x="100.0" y="896.0" width="480.0" height="8" fill="none" stroke="black" stroke-width="2"/>
+        <text x="200.0" y="935.0" font-size="14" fill="black">Окно (4800)</text>
+
+        <!-- Простенок (1.2м) -->
+        <text x="610.0" y="935.0" font-size="14" fill="black">Простенок (1200)</text>
+
+        <!-- КОЛОННА -->
+        <rect x="250.0" y="450.0" width="90.0" height="90.0" fill="none" stroke="black" stroke-width="2"/>
+        <text x="295.0" y="470.0" font-size="12" text-anchor="middle" fill="black">Колонна</text>
+        <text x="295.0" y="490.0" font-size="12" text-anchor="middle" fill="black">900х900</text>
+
+        <!-- РЕСЕПШН -->
+        <rect x="640.0" y="400.0" width="60.0" height="280.0" fill="none" stroke="black" stroke-width="2"/>
+        <text x="625.0" y="440.0" font-size="14" font-weight="bold" text-anchor="end" fill="black">Ресепшн</text>
+
+        <!-- ЗАДНЯЯ СТЕНА (Черные линии) -->
+        <!-- Белая дверь -->
+        <rect x="530.0" y="0" width="90.0" height="8" fill="none" stroke="black" stroke-width="2"/>
+        <text x="575.0" y="-20" font-size="12" text-anchor="middle" fill="black">Тех. кабинет</text>
+
+        <!-- Витрина -->
+        <rect x="400.0" y="0" width="130.0" height="8" fill="none" stroke="black" stroke-width="2"/>
+        <text x="465.0" y="-20" font-size="12" text-anchor="middle" fill="black">Витрина (1300)</text>
+
+        <!-- Фиолетовая дверь -->
+        <rect x="310.0" y="0" width="90.0" height="8" fill="none" stroke="black" stroke-width="2"/>
+        <text x="355.0" y="-20" font-size="12" text-anchor="middle" fill="black">Склад</text>
+    </g>
+</svg>
